@@ -10,7 +10,7 @@ const App = () => {
   return (
     <Wrapper
       render={render}
-      libraries={['places']}
+      libraries={['places', 'geometry']}
       apiKey={"AIzaSyDrvk6bbmmOnipvYEUMUicbgMvU5_kCgTs"}
     >
       <Map />

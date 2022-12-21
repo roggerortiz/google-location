@@ -3,41 +3,93 @@ import { useEffect, useRef, useState } from 'react'
 const Map = () => {
    const mapRef = useRef(null);
    const searchRef = useRef(null);
+   const [loaded, setLoaded] = useState();
    const [map, setMap] = useState();
    const [marker, setMarker] = useState();
    const [location, setLocation] = useState();
+   const [city, setCity] = useState();
+   const [myCity, setMyCity] = useState();
+   const [myLocation, setMyLocation] = useState();
 
-   const loadGoogleMap = (position) => {
-      if (!mapRef.current || !searchRef.current) return
+   const setSearchFocus = () => {
+      if (!searchRef.current) {
+         return
+      }
 
-      const center = {
-         lat: position.coords.latitude,
-         lng: position.coords.longitude,
-      };
+      searchRef.current.focus()
+   }
 
-      const map = new window.google.maps.Map(mapRef.current, {
-         zoom: 13,
-         center: center,
+   const setCurrentLocation = () => {
+      if (!navigator.geolocation) {
+         handleGeolocationError(false)
+         return
+      }
+
+      navigator.geolocation.getCurrentPosition(
+         (position) => {
+            setLocation({
+               lat: position.coords.latitude,
+               lng: position.coords.longitude,
+            })
+            setMyLocation({
+               lat: position.coords.latitude,
+               lng: position.coords.longitude,
+            })
+         },
+         () => handleGeolocationError(true)
+      )
+   }
+
+   const setCurrentCity = () => {
+      if (!location || city) return
+
+      const { lat, lng } = location
+      const latlng = new window.google.maps.LatLng(lat, lng);
+
+      const geocoder = new window.google.maps.Geocoder();
+      geocoder.geocode({ 'latLng': latlng }, (results, status) => {
+         if (status !== google.maps.GeocoderStatus.OK || results.length <= 0) {
+            setCity()
+            return
+         }
+
+         const addresses = results[0].address_components
+         const address = addresses.find(result => result.types.some(type => type === 'locality'))
+         const city = address?.long_name ?? ''
+
+         setCity(city)
+         setMyCity(city)
+      })
+   }
+
+   const initializeMap = async () => {
+      if (loaded || map || !location || !city || !mapRef.current || !searchRef.current) {
+         return
+      }
+
+      const newMap = new window.google.maps.Map(mapRef.current, {
+         zoom: 12,
+         center: location,
       });
 
-      map.addListener("bounds_changed", () => {
-         searchBox.setBounds(map.getBounds());
-      })
-
       const marker = new window.google.maps.Marker({
-         map: map,
+         map: newMap,
+         title: city,
          draggable: true,
-         position: center,
+         position: location,
       });
 
       const searchBox = new window.google.maps.places.SearchBox(searchRef.current);
 
-      let markers = []
+      newMap.addListener("bounds_changed", () => {
+         searchBox.setBounds(newMap.getBounds());
+      })
 
+      let markers = [marker]
       searchBox.addListener("places_changed", () => {
          const places = searchBox.getPlaces();
 
-         if (places.length == 0) {
+         if (places.length <= 0) {
             return
          }
 
@@ -48,49 +100,35 @@ const Map = () => {
             return;
          }
 
-         const searchMarker = new google.maps.Marker({
-            map,
+         const searchCity = place.name
+         const searchLocation = {
+            lat: place.geometry.location.lat(),
+            lng: place.geometry.location.lng(),
+         }
+
+         const searchMarker = new window.google.maps.Marker({
+            map: newMap,
             draggable: true,
-            title: place.name,
-            position: place.geometry.location,
+            title: searchCity,
+            position: searchLocation,
          });
 
          markers.forEach((marker) => marker.setMap(null));
          markers = [searchMarker]
 
-         const searchCenter = {
-            lat: place.geometry.location.lat(),
-            lng: place.geometry.location.lng(),
-         }
-
-         map.setOptions({
-            center: searchCenter
+         newMap.setOptions({
+            center: searchLocation,
          })
 
-         setMap(map)
+         setMap(newMap)
          setMarker(searchMarker)
-         setLocation(searchCenter)
+         setLocation(searchLocation)
+         setCity(searchCity)
       })
 
-      setMap(map)
+      setMap(newMap)
       setMarker(marker)
-      setLocation(center)
-   }
-
-   const setCurrentLocation = () => {
-      if (map) {
-         return
-      }
-
-      if (!navigator.geolocation) {
-         handleGeolocationError(false)
-         return
-      }
-
-      navigator.geolocation.getCurrentPosition(
-         loadGoogleMap,
-         () => handleGeolocationError(true)
-      )
+      setLoaded(true)
    }
 
    const addMarkerEvent = () => {
@@ -104,6 +142,28 @@ const Map = () => {
       })
    }
 
+   const getDistanceFromMyLocation = () => {
+      if (!location || !city || !myLocation || !myCity) {
+         return
+      }
+
+      const { lat: lat1, lng: lng1 } = location
+      const { lat: lat2, lng: lng2 } = myLocation
+
+      if (lat1 === lat2 && lng1 === lng2) {
+         return
+      }
+
+      const latlng1 = new window.google.maps.LatLng(lat1, lng1);
+      const latlng2 = new window.google.maps.LatLng(lat2, lng2);
+
+      // const earthRadioMt = 6371000
+      // const distance = window.google.maps.geometry.spherical.computeDistanceBetween(latlng1, latlng2, earthRadioMt);
+      const distance = window.google.maps.geometry.spherical.computeDistanceBetween(latlng1, latlng2);
+
+      console.log(`Distance from ${myCity} to ${city} es ${Math.round(distance / 100)} km.`)
+   }
+
    const handleGeolocationError = (browserHasGeolocation) => () => {
       console.log(
          browserHasGeolocation
@@ -113,7 +173,10 @@ const Map = () => {
    }
 
    useEffect(() => {
+      setCurrentLocation()
+
       return () => {
+         setCity()
          setMap()
          setMarker()
          setLocation()
@@ -121,12 +184,24 @@ const Map = () => {
    }, []);
 
    useEffect(() => {
-      setCurrentLocation()
-   }, [mapRef, map]);
+      setSearchFocus()
+   }, [searchRef]);
+
+   useEffect(() => {
+      setCurrentCity()
+   }, [location]);
+
+   useEffect(() => {
+      initializeMap()
+   }, [loaded, map, location, city, mapRef, searchRef]);
 
    useEffect(() => {
       addMarkerEvent()
    }, [marker]);
+
+   useEffect(() => {
+      getDistanceFromMyLocation()
+   }, [location, city, myLocation, myCity]);
 
    return (
       <div className="map-wrapper">
@@ -137,6 +212,21 @@ const Map = () => {
                placeholder="Search location"
                className="form-control form-control-sm mx-1"
             />
+
+            <span className="mx-1">
+               City:
+            </span>
+
+            <input
+               type="text"
+               disabled={true}
+               value={city ?? ''}
+               className="form-control form-control-sm mx-1"
+            />
+            <span className="mx-1">
+               Location:
+            </span>
+
             <input
                type="text"
                disabled={true}
